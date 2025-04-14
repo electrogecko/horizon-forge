@@ -191,12 +191,75 @@ public class TerrainOnlyImporterWindow : EditorWindow
 	}
 
 
+	void ReadTfragChunks(string mapBinFolder, Tfrag tfrag)
+	{
+		string terrainBinFile = Path.Combine(mapBinFolder, "terrain.bin");
+		if (!File.Exists(terrainBinFile))
+		{
+			Debug.LogWarning("[TFRAG] Missing terrain.bin for initial TfragChunk setup.");
+			return;
+		}
+
+		Debug.Log("[TFRAG] ReadTfragChunks() was called");
+
+		using (var fs = File.OpenRead(terrainBinFile))
+		using (var reader = new BinaryReader(fs))
+		{
+			var packetStart = reader.ReadInt32();
+			var packetCount = reader.ReadInt32();
+
+			var chunkOffsets = new List<int>(packetCount);
+
+			// Read all offsets first
+			for (int i = 0; i < packetCount; i++)
+			{
+				fs.Position = packetStart + (i * 0x40) + 0x10;
+				int dataOffset = reader.ReadInt32();
+				chunkOffsets.Add(dataOffset);
+			}
+
+			for (int i = 0; i < packetCount; i++)
+			{
+				var chunkTransform = tfrag.transform.Find($"tfrag_{i}");
+				if (!chunkTransform)
+				{
+					Debug.LogWarning($"[TFRAG] Missing tfrag chunk {i}");
+					continue;
+				}
+
+				var chunk = chunkTransform.gameObject.AddComponent<TfragChunk>();
+				Debug.Log($"[TFRAG] Adding chunk {i}");
+
+				// Read header
+				fs.Position = packetStart + (i * 0x40);
+				chunk.HeaderBytes = reader.ReadBytes(0x40);
+				chunk.OcclusionId = BitConverter.ToInt16(chunk.HeaderBytes, 0x3a);
+
+				// Data range
+				int dataOffset = chunkOffsets[i];
+				int dataLen = (i + 1 < packetCount)
+					? chunkOffsets[i + 1] - dataOffset
+					: (int)(fs.Length - (packetStart + dataOffset));
+
+				fs.Position = packetStart + dataOffset;
+				chunk.DataBytes = reader.ReadBytes(dataLen);
+
+				Debug.Log($"[TFRAG] Chunk {i} data offset: {dataOffset}, length: {dataLen}");
+			}
+		}
+	}
+
+
+
+
     void ReadTfragChunksWithCustomOcclusion(string mapBinFolder, string occlusionFolder, Tfrag tfrag)
 	{
 		var terrainBinFile = Path.Combine(mapBinFolder, "terrain.bin");
 		var tfragOcclusionFile = Path.Combine(occlusionFolder, "tfrag.bin");
 
 		if (!File.Exists(terrainBinFile)) return;
+
+		Debug.Log("[TFRAG] ReadTfragChunksWithCustomOcclusion() was called");
 
 		var instancesById = new Dictionary<int, TfragChunk>();
 
@@ -206,12 +269,22 @@ public class TerrainOnlyImporterWindow : EditorWindow
 			var packetStart = reader.ReadInt32();
 			var packetCount = reader.ReadInt32();
 
+			var chunkOffsets = new List<int>(packetCount);
+
+			// Pre-pass: read all offsets
+			for (int i = 0; i < packetCount; i++)
+			{
+				fs.Position = packetStart + (i * 0x40) + 0x10;
+				int dataOffset = reader.ReadInt32();
+				chunkOffsets.Add(dataOffset);
+			}
+
 			for (int i = 0; i < packetCount; i++)
 			{
 				var chunkTransform = tfrag.transform.Find($"tfrag_{i}");
 				if (!chunkTransform)
 				{
-					Debug.LogWarning($"Missing tfrag chunk {i}");
+					Debug.LogWarning($"[TFRAG] Missing tfrag chunk {i}");
 					continue;
 				}
 
@@ -222,18 +295,17 @@ public class TerrainOnlyImporterWindow : EditorWindow
 				tfragChunk.OcclusionId = BitConverter.ToInt16(tfragChunk.HeaderBytes, 0x3a);
 				instancesById[i] = tfragChunk;
 
-				fs.Position = packetStart + (i * 0x40) + 0x10;
-				var dataOff = reader.ReadInt32();
-				var dataLen = (i + 1 < packetCount)
-					? reader.ReadInt32() - dataOff
-					: (int)(fs.Length - dataOff - packetStart);
+				int dataOffset = chunkOffsets[i];
+				int dataLen = (i + 1 < packetCount)
+					? chunkOffsets[i + 1] - dataOffset
+					: (int)(fs.Length - (packetStart + dataOffset));
 
-				fs.Position = dataOff + packetStart;
+				fs.Position = packetStart + dataOffset;
 				tfragChunk.DataBytes = reader.ReadBytes(dataLen);
 			}
 		}
 
-		// Read occlusion
+		// Load occlusion octants from tfrag.bin
 		if (File.Exists(tfragOcclusionFile))
 		{
 			var tfragOcclusion = File.ReadAllBytes(tfragOcclusionFile);
@@ -255,6 +327,7 @@ public class TerrainOnlyImporterWindow : EditorWindow
 			}
 		}
 	}
+
 
 
 	void ImportTfrags(string mapBinFolder, string mapResourcesFolder, GameObject rootGo, int racVersion, int levelId)
@@ -384,53 +457,56 @@ public class TerrainOnlyImporterWindow : EditorWindow
 			EditorUtility.SetDirty(mat);
 
 			if (matAlreadyExists)
-				AssetDatabase.SaveAssetIfDirty(mat);
-			else
-				AssetDatabase.CreateAsset(mat, unityMatPath);
-		}
-
-
-		// Import mesh from .dae
-		BlenderHelper.ImportMesh(terrainOutColladaFile, terrainMapResourcesFolder, "tfrags", overwrite: true, out var outMeshFile, fixNormals: false);
-		AssetDatabase.ImportAsset(UnityHelper.GetProjectRelativePath(outMeshFile));
-		SetModelImportSettings(UnityHelper.GetProjectRelativePath(outMeshFile), addCollider: false, remapMaterials: true);
-
-
-		// Spawn prefab instance
-		var tfragPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(UnityHelper.GetProjectRelativePath(outMeshFile));
-		if (tfragPrefab)
-		{
-			var tfragGo = (GameObject)GameObject.Instantiate(tfragPrefab);
-			if (tfragGo)
 			{
-				tfragGo.name = "tfrags";
-				tfragGo.transform.SetParent(rootGo.transform, true);
+				AssetDatabase.SaveAssetIfDirty(mat);
+			}
+			else
+			{
+				var matDir = Path.GetDirectoryName(unityMatPath);
+				if (!Directory.Exists(matDir))
+					Directory.CreateDirectory(matDir);
 
-				// Align to origin BEFORE editing any meshes
-				tfragGo.transform.localPosition = Vector3.zero;
-				tfragGo.transform.localRotation = Quaternion.identity;
-				tfragGo.transform.localScale = Vector3.one;
-
-				var tfrag = tfragGo.AddComponent<Tfrag>();
-				tfragGo.layer = LayerMask.NameToLayer("TFRAG");
-				UnityHelper.RecurseHierarchy(tfragGo.transform, (t) => t.gameObject.layer = tfragGo.layer);
-
-				// Detach shared meshes so they are editable
-				for (int i = 0; i < tfragGo.transform.childCount; ++i)
-				{
-					var child = tfragGo.transform.GetChild(i);
-					var mf = child.GetComponent<MeshFilter>();
-					if (mf)
-						mf.sharedMesh = mf.sharedMesh.Clone();
-				}
-
-
+				AssetDatabase.CreateAsset(mat, unityMatPath);
 			}
 
-
-			// Cleanup original .dae prefab
-			AssetDatabase.DeleteAsset(UnityHelper.GetProjectRelativePath(outMeshFile));
 		}
+
+		// 1. Import mesh
+		BlenderHelper.ImportMesh(terrainOutColladaFile, terrainMapResourcesFolder, "tfrags", overwrite: true, out var outMeshFile, fixNormals: false);
+
+		// 2. Set import settings BEFORE instantiating or deleting
+		string meshAssetPath = UnityHelper.GetProjectRelativePath(outMeshFile);
+		AssetDatabase.ImportAsset(meshAssetPath);
+		SetModelImportSettings(meshAssetPath, addCollider: false, remapMaterials: true);
+
+		// 3. Load and instantiate prefab
+		var tfragPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(meshAssetPath); 
+		var tfragGo = (GameObject)GameObject.Instantiate(tfragPrefab);
+		if (tfragGo)
+		{
+			tfragGo.name = "tfrags";
+			tfragGo.transform.SetParent(rootGo.transform, true);
+			tfragGo.transform.localPosition = Vector3.zero;
+			tfragGo.transform.localRotation = Quaternion.identity;
+			tfragGo.transform.localScale = Vector3.one;
+
+			var tfrag = tfragGo.AddComponent<Tfrag>();
+			tfragGo.layer = LayerMask.NameToLayer("TFRAG");
+			UnityHelper.RecurseHierarchy(tfragGo.transform, (t) => t.gameObject.layer = tfragGo.layer);
+
+			for (int i = 0; i < tfragGo.transform.childCount; ++i)
+			{
+				var child = tfragGo.transform.GetChild(i);
+				var mf = child.GetComponent<MeshFilter>();
+				if (mf)
+					mf.sharedMesh = mf.sharedMesh.Clone();
+			}
+
+			// load per-chunk metadata before deleting prefab
+			ReadTfragChunks(terrainBinFolder, tfrag);
+		}
+
+
 		
 		// Force Unity to re-import the model with materials now in place
 		AssetDatabase.ImportAsset(UnityHelper.GetProjectRelativePath(outMeshFile), ImportAssetOptions.ForceUpdate);
