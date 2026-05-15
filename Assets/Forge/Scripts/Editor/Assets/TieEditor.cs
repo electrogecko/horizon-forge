@@ -16,6 +16,7 @@ public class TieEditor : Editor
     private SerializedProperty m_DZOBrightnessProperty;
     private SerializedProperty m_ReflectionProperty;
     private SerializedProperty m_GroupIdProperty;
+    private SerializedProperty m_AlwaysVisibleProperty;
     private SerializedProperty m_InstancedColliderProperty;
     private SerializedProperty m_RenderInstancedColliderProperty;
     private SerializedProperty m_InstancedColliderIdOverridesProperty;
@@ -38,6 +39,7 @@ public class TieEditor : Editor
         m_DZOBrightnessProperty = serializedObject.FindProperty("DZOBrightness");
         m_ReflectionProperty = serializedObject.FindProperty("Reflection");
         m_GroupIdProperty = serializedObject.FindProperty("GroupId");
+        m_AlwaysVisibleProperty = serializedObject.FindProperty("AlwaysVisible");
         m_InstancedColliderProperty = serializedObject.FindProperty("InstancedCollider");
         m_RenderInstancedColliderProperty = serializedObject.FindProperty("RenderInstancedCollider");
         m_InstancedColliderIdOverridesProperty = serializedObject.FindProperty("InstancedColliderIdOverrides");
@@ -89,6 +91,8 @@ public class TieEditor : Editor
             octantCount += data.Octants?.Length ?? 0;
         }
 
+        serializedObject.Update();
+
         if (HasOneTarget)
         {
             var tie = (Tie)target;
@@ -96,6 +100,7 @@ public class TieEditor : Editor
             EditorGUILayout.TextField("OClass", $"{tie?.OClass} ({tie?.OClass:X4})");
             EditorGUILayout.TextField("Occlusion Id", tie?.OcclusionId.ToString());
             EditorGUI.EndDisabledGroup();
+            EditorGUILayout.PropertyField(m_AlwaysVisibleProperty);
 
             // init db
             var db = m_MapConfig.GetTieDatabase();
@@ -127,7 +132,6 @@ public class TieEditor : Editor
         }
 
         //base.OnInspectorGUI();
-        serializedObject.Update();
 
         // misc properties
         EditorGUILayout.PropertyField(m_GroupIdProperty);

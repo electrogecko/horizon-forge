@@ -28,6 +28,8 @@ public class Tie : RenderSelectionBase, IOcclusionData, IAsset, IInstancedCollid
     [HideInInspector, SerializeField] private Vector3[] _octants;
     [HideInInspector, SerializeField] private int _occlusionId;
     [HideInInspector, SerializeField] private SerializableGuid _uid;
+    [Tooltip("Export this tie instance with occlusion id -1 (0xFFFFFFFF).")]
+    public bool AlwaysVisible;
 
     public Matrix4x4 Reflection = Matrix4x4.identity;
 

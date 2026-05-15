@@ -1297,6 +1297,7 @@ public static class ForgeBuilder
 
             var tieDir = Path.Combine(tieInstancesFolder, $"{tie.OClass:00000}_{tie.OClass:X4}/{classCountIdx:D4}");
             if (!Directory.Exists(tieDir)) Directory.CreateDirectory(tieDir);
+            var exportedOcclusionId = tie.AlwaysVisible ? -1 : tie.OcclusionId;
 
             // write colors
             File.WriteAllBytes(Path.Combine(tieDir, "colors.bin"), tie.ColorData ?? new byte[0]);
@@ -1312,7 +1313,7 @@ public static class ForgeBuilder
                     writer.Write((int)tie.OClass);
                     writer.Write((int)0xFA0);
                     writer.Write((int)0);
-                    writer.Write((int)tie.OcclusionId);
+                    writer.Write((int)exportedOcclusionId);
 
                     // write matrix back in respective order
                     var m = tie.Reflection * tie.transform.localToWorldMatrix;
