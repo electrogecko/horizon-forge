@@ -2365,6 +2365,7 @@ public static class UnityHelper
             {
                 var bytes = tex2.EncodeToPNG();
                 File.WriteAllBytes(path, bytes);
+                return true;
             }
         }
 
